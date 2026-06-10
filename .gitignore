@@ -1,0 +1,12 @@
+# 인증 정보 — 절대 커밋 금지
+.env
+
+# 수집 데이터 캐시
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/

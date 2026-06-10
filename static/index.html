@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>재고 분석 대시보드 — ECOUNT</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <h1>📦 재고 분석 대시보드</h1>
+    <div class="topbar-right">
+      <span id="source-badge" class="badge badge-gray">로딩중…</span>
+      <span id="fetched-at" class="muted"></span>
+      <button id="btn-refresh" class="btn">⟳ 데이터 새로고침</button>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+  <div id="loading" class="loading">데이터를 분석하는 중입니다…</div>
+  <div id="error-box" class="error-box hidden"></div>
+
+  <div id="dashboard" class="hidden">
+
+    <!-- KPI 카드 -->
+    <section class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">재고자산 총액</div>
+        <div class="kpi-value" id="kpi-stock-amount">-</div>
+        <div class="kpi-sub" id="kpi-item-count">-</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">재고회전율 (연환산)</div>
+        <div class="kpi-value" id="kpi-turnover">-</div>
+        <div class="kpi-sub" id="kpi-doi">-</div>
+      </div>
+      <div class="kpi-card kpi-warn">
+        <div class="kpi-label">체화·악성 재고금액</div>
+        <div class="kpi-value" id="kpi-stagnant-amount">-</div>
+        <div class="kpi-sub" id="kpi-stagnant-ratio">-</div>
+      </div>
+      <div class="kpi-card kpi-alert">
+        <div class="kpi-label">발주 필요 품목</div>
+        <div class="kpi-value" id="kpi-reorder">-</div>
+        <div class="kpi-sub" id="kpi-imminent">-</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">판매 추세</div>
+        <div class="kpi-value" id="kpi-trend">-</div>
+        <div class="kpi-sub" id="kpi-nosales">-</div>
+      </div>
+    </section>
+
+    <!-- 탭 -->
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="overview">종합</button>
+      <button class="tab" data-tab="turnover">회전율 랭킹</button>
+      <button class="tab" data-tab="abc">ABC 분석</button>
+      <button class="tab" data-tab="stagnant">체화·악성재고</button>
+      <button class="tab" data-tab="trend">판매 추세</button>
+      <button class="tab" data-tab="reorder">발주 제안</button>
+      <button class="tab" data-tab="all">품목 전체</button>
+    </nav>
+
+    <!-- 종합 -->
+    <section class="panel active" id="panel-overview">
+      <div class="grid-2">
+        <div class="card">
+          <h2>월별 출고금액 추이</h2>
+          <canvas id="chart-monthly"></canvas>
+        </div>
+        <div class="card">
+          <h2>ABC 등급별 매출 구성</h2>
+          <canvas id="chart-abc-donut"></canvas>
+        </div>
+      </div>
+      <div class="card">
+        <h2>지금 살펴봐야 할 품목 <span class="muted small">(추천 액션)</span></h2>
+        <div class="table-wrap"><table id="table-actions"></table></div>
+      </div>
+    </section>
+
+    <!-- 회전율 -->
+    <section class="panel" id="panel-turnover">
+      <div class="grid-2">
+        <div class="card">
+          <h2>🔥 잘 나가는 품목 TOP 15 <span class="muted small">(회전율 높은 순)</span></h2>
+          <canvas id="chart-top-turnover"></canvas>
+        </div>
+        <div class="card">
+          <h2>🧊 잘 안 나가는 품목 TOP 15 <span class="muted small">(재고 보유 중 회전율 낮은 순)</span></h2>
+          <canvas id="chart-bottom-turnover"></canvas>
+        </div>
+      </div>
+      <div class="card">
+        <h2>품목별 회전율 <span class="muted small">— 회전율 = 연환산 출고량 ÷ 평균재고, 재고일수 = 365 ÷ 회전율</span></h2>
+        <div class="table-wrap"><table id="table-turnover"></table></div>
+      </div>
+    </section>
+
+    <!-- ABC -->
+    <section class="panel" id="panel-abc">
+      <div class="card">
+        <h2>파레토 차트 <span class="muted small">(출고금액 상위 30개 품목 · 누적 점유율)</span></h2>
+        <canvas id="chart-pareto" height="110"></canvas>
+      </div>
+      <div class="card">
+        <h2>ABC 등급별 품목 <span class="muted small">— A: 매출 누적 80%, B: 80~95%, C: 나머지</span></h2>
+        <div class="abc-summary" id="abc-summary"></div>
+        <div class="table-wrap"><table id="table-abc"></table></div>
+      </div>
+    </section>
+
+    <!-- 체화 -->
+    <section class="panel" id="panel-stagnant">
+      <div class="card">
+        <h2>체화·악성 재고 <span class="muted small" id="stagnant-caption"></span></h2>
+        <div class="filter-row">
+          <label><input type="checkbox" id="chk-dead" checked> 악성</label>
+          <label><input type="checkbox" id="chk-stagnant" checked> 체화</label>
+          <label><input type="checkbox" id="chk-caution"> 주의</label>
+          <button class="btn btn-small" id="btn-csv-stagnant">CSV 다운로드</button>
+        </div>
+        <div class="table-wrap"><table id="table-stagnant"></table></div>
+      </div>
+    </section>
+
+    <!-- 추세 -->
+    <section class="panel" id="panel-trend">
+      <div class="card">
+        <h2>월별 출고 추이</h2>
+        <div class="filter-row">
+          <label><input type="radio" name="trend-mode" value="amt" checked> 금액</label>
+          <label><input type="radio" name="trend-mode" value="qty"> 수량</label>
+        </div>
+        <canvas id="chart-trend" height="90"></canvas>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h2>📈 상승 추세 품목 <span class="muted small">(최근 3개월 vs 직전 3개월)</span></h2>
+          <div class="table-wrap"><table id="table-trend-up"></table></div>
+        </div>
+        <div class="card">
+          <h2>📉 하락 추세 품목</h2>
+          <div class="table-wrap"><table id="table-trend-down"></table></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 발주 -->
+    <section class="panel" id="panel-reorder">
+      <div class="card">
+        <h2>발주 필요 품목 <span class="muted small" id="reorder-caption"></span></h2>
+        <div class="filter-row">
+          <button class="btn btn-small" id="btn-csv-reorder">CSV 다운로드</button>
+        </div>
+        <div class="table-wrap"><table id="table-reorder"></table></div>
+        <p class="muted small">
+          안전재고 = z(서비스수준) × 일출고 표준편차 × √리드타임 ·
+          재주문점 = 일평균출고 × 리드타임 + 안전재고 ·
+          권장발주량 = 30일분 수요 + 안전재고 − 현재고.
+          리드타임·서비스수준은 .env에서 조정할 수 있습니다.
+        </p>
+      </div>
+    </section>
+
+    <!-- 전체 -->
+    <section class="panel" id="panel-all">
+      <div class="card">
+        <h2>품목 전체 지표</h2>
+        <div class="filter-row">
+          <input type="search" id="search-all" placeholder="품목명·코드·카테고리 검색">
+          <button class="btn btn-small" id="btn-csv-all">CSV 다운로드</button>
+        </div>
+        <div class="table-wrap"><table id="table-all"></table></div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<footer class="footer muted small">
+  기간: <span id="period-label">-</span> · 데이터 출처: <span id="source-label">-</span> ·
+  교차비율 = 회전율(금액) × 마진율 — 클수록 "잘 돌면서 이익도 남는" 품목
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
