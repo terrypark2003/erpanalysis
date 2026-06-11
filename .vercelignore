@@ -1,0 +1,11 @@
+# Vercel 배포에서 제외 (.gitignore와 별개로 CLI 업로드 시 적용됨)
+.env
+data/
+tests/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.git/
+run.py

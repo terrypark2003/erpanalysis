@@ -25,9 +25,13 @@ def load_cache(path: Path) -> dict[str, Any] | None:
 
 
 def save_cache(path: Path, dataset: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(dataset, f, ensure_ascii=False)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(dataset, f, ensure_ascii=False)
+    except OSError:
+        # 읽기전용 파일시스템(서버리스 등)에서는 캐시 저장을 건너뛴다
+        pass
 
 
 def fetch_dataset(settings: Settings, force_refresh: bool = False) -> dict[str, Any]:

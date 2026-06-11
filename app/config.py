@@ -61,7 +61,11 @@ class Settings:
     # 데모 모드 강제 여부(미설정 시 인증키 없으면 데모)
     demo_mode_env: str = field(default_factory=lambda: os.getenv("DEMO_MODE", "").strip().lower())
 
-    cache_path: Path = field(default_factory=lambda: BASE_DIR / "data" / "cache.json")
+    # 서버리스(Vercel)는 프로젝트 디렉터리가 읽기전용이라 /tmp에 캐시한다
+    cache_path: Path = field(default_factory=lambda: (
+        Path("/tmp/erp_cache.json") if os.getenv("VERCEL")
+        else BASE_DIR / "data" / "cache.json"
+    ))
 
     @property
     def has_credentials(self) -> bool:
