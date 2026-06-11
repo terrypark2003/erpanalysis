@@ -46,8 +46,8 @@ function renderTable(el, columns, rows, opts = {}) {
   if (state.key) {
     const col = columns.find((c) => c.key === state.key);
     sorted.sort((a, b) => {
-      let va = col.sortValue ? col.sortValue(a) : a[state.key];
-      let vb = col.sortValue ? col.sortValue(b) : b[state.key];
+      let va = col && col.sortValue ? col.sortValue(a) : a[state.key];
+      let vb = col && col.sortValue ? col.sortValue(b) : b[state.key];
       if (va === null || va === undefined) va = -Infinity;
       if (vb === null || vb === undefined) vb = -Infinity;
       if (typeof va === "string") return va.localeCompare(vb, "ko") * state.dir;
@@ -354,7 +354,7 @@ function renderAllTable() {
   renderTable(document.getElementById("table-all"),
     [COL.name, COL.curQty, COL.stockAmt, COL.turnover, COL.doi, COL.stockout,
      COL.abc, COL.grade, COL.trend, COL.cross, COL.action],
-    rows, { defaultSort: "out_amount" });
+    rows, { defaultSort: "stock_amount" });
 }
 
 /* ---------- CSV 핸들러 ---------- */
