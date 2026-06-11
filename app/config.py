@@ -61,6 +61,9 @@ class Settings:
     # 데모 모드 강제 여부(미설정 시 인증키 없으면 데모)
     demo_mode_env: str = field(default_factory=lambda: os.getenv("DEMO_MODE", "").strip().lower())
 
+    # 대시보드 접근 비밀번호(공개 배포 시 실데이터 보호용, 실데이터 모드에선 필수)
+    dashboard_password: str = field(default_factory=lambda: os.getenv("DASHBOARD_PASSWORD", "").strip())
+
     # 서버리스(Vercel)는 프로젝트 디렉터리가 읽기전용이라 /tmp에 캐시한다
     cache_path: Path = field(default_factory=lambda: (
         Path("/tmp/erp_cache.json") if os.getenv("VERCEL")
