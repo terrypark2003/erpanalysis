@@ -25,7 +25,7 @@ _state: dict = {"result": None, "error": None}
 
 # 진단용 경로는 비밀번호 없이 허용(영업 데이터 미포함)
 _OPEN_PATHS = {"/api/status", "/api/test-connection", "/api/test-collect",
-               "/api/probe-endpoints", "/api/test-history"}
+               "/api/probe-endpoints", "/api/test-history", "/api/test-build"}
 
 
 @app.middleware("http")
@@ -245,6 +245,63 @@ def api_test_history():
         client.close()
     return {"results": out,
             "해석": "총재고수량이 기준일마다 다르면 과거조회 지원 → 출고 역산 가능"}
+
+
+@app.get("/api/test-build")
+def api_test_build():
+    """수집 메커니즘 경량 점검: 품목 가격 유입 여부 + 재고 2시점 변동 환산만
+    집계로 반환(개별 데이터·금액 총액 미반환)."""
+    if settings.demo_mode:
+        return {"ok": False, "detail": "데모 모드"}
+    from datetime import date, timedelta
+    from .ecount_client import EcountClient, pick, _to_float
+    client = EcountClient(
+        com_code=settings.com_code, user_id=settings.user_id,
+        api_cert_key=settings.api_cert_key, zone=settings.zone,
+        use_test_server=settings.use_test_server, proxy=settings.ecount_proxy,
+    )
+    try:
+        client.login()
+        base = date.today()
+        prod_rows = client.call("products", {"PROD_CD": "", "BASE_DATE": base.strftime("%Y%m%d")})
+        with_out = with_in = 0
+        for r in prod_rows:
+            if not str(pick(r, "prod_cd", "")).strip():
+                continue
+            if _to_float(pick(r, "out_price")) > 0:
+                with_out += 1
+            if _to_float(pick(r, "in_price")) > 0:
+                with_in += 1
+        snaps: dict = {}
+        for days in (0, 84):
+            d = base - timedelta(days=days)
+            try:
+                rows = client.call("inventory_balance", {"BASE_DATE": d.strftime("%Y%m%d")})
+                snaps[days] = {str(pick(x, "prod_cd", "")).strip(): _to_float(pick(x, "bal_qty"))
+                               for x in rows if str(pick(x, "prod_cd", "")).strip()}
+            except Exception as e:
+                snaps[days] = {"_error": str(e)[:80]}
+        out_cnt = 0
+        out_units = 0.0
+        cur, old = snaps.get(0, {}), snaps.get(84, {})
+        if "_error" not in cur and "_error" not in old:
+            for c in set(old) | set(cur):
+                drop = old.get(c, 0.0) - cur.get(c, 0.0)
+                if drop > 0:
+                    out_cnt += 1
+                    out_units += drop
+        return {
+            "ok": True,
+            "품목수": sum(1 for r in prod_rows if str(pick(r, "prod_cd", "")).strip()),
+            "판매가>0 품목": with_out,
+            "구매가>0 품목": with_in,
+            "재고_현재_품목수": len(cur) if "_error" not in cur else cur,
+            "재고_84일전_품목수": len(old) if "_error" not in old else old,
+            "감소(출고)품목수": out_cnt,
+            "84일간_총감소수량": round(out_units, 1),
+        }
+    finally:
+        client.close()
 
 
 @app.get("/")
