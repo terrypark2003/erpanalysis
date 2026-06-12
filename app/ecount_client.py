@@ -90,7 +90,8 @@ class EcountClient:
 
     def __init__(self, com_code: str, user_id: str, api_cert_key: str,
                  zone: str = "", use_test_server: bool = False,
-                 call_interval: float = 1.1, timeout: float = 30.0):
+                 call_interval: float = 1.1, timeout: float = 30.0,
+                 proxy: str = ""):
         self.com_code = com_code
         self.user_id = user_id
         self.api_cert_key = api_cert_key
@@ -99,8 +100,12 @@ class EcountClient:
         self.call_interval = call_interval
         self.session_id: str | None = None
         self._last_call = 0.0
-        self._http = httpx.Client(timeout=timeout,
-                                  headers={"Content-Type": "application/json"})
+        # 고정 IP 프록시(ECOUNT IP 허용목록 대응) — 설정 시 모든 호출이 경유한다
+        client_kwargs: dict = {"timeout": timeout,
+                               "headers": {"Content-Type": "application/json"}}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        self._http = httpx.Client(**client_kwargs)
 
     # ------------------------------------------------------------------
     def _throttle(self):
@@ -207,6 +212,7 @@ def fetch_dataset(settings) -> dict[str, Any]:
         api_cert_key=settings.api_cert_key,
         zone=settings.zone,
         use_test_server=settings.use_test_server,
+        proxy=settings.ecount_proxy,
     )
     try:
         client.login()
@@ -338,6 +344,7 @@ def test_connection(settings) -> dict[str, Any]:
         api_cert_key=settings.api_cert_key,
         zone=settings.zone,
         use_test_server=settings.use_test_server,
+        proxy=settings.ecount_proxy,
     )
     try:
         try:

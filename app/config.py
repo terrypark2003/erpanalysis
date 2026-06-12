@@ -46,6 +46,8 @@ class Settings:
     zone: str = field(default_factory=lambda: os.getenv("ECOUNT_ZONE", "").strip())
     # 테스트 서버(sboapi) 사용 여부 — ECOUNT 테스트 인증키 사용 시 true
     use_test_server: bool = field(default_factory=lambda: _env_bool("ECOUNT_TEST_SERVER", False))
+    # 고정 IP 프록시 URL(ECOUNT IP 허용목록 대응). 예: http://user:pass@host:port
+    ecount_proxy: str = field(default_factory=lambda: os.getenv("ECOUNT_PROXY", "").strip())
 
     # 분석 파라미터
     analysis_months: int = field(default_factory=lambda: _env_int("ANALYSIS_MONTHS", 12))
