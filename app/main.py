@@ -24,7 +24,7 @@ _lock = threading.Lock()
 _state: dict = {"result": None, "error": None}
 
 # 진단용 경로는 비밀번호 없이 허용(영업 데이터 미포함)
-_OPEN_PATHS = {"/api/status", "/api/test-connection", "/api/test-collect"}
+_OPEN_PATHS = {"/api/status", "/api/test-connection", "/api/test-collect", "/api/probe-endpoints"}
 
 
 @app.middleware("http")
@@ -167,6 +167,52 @@ def api_test_collect():
     finally:
         client.close()
     return {"steps": steps, "ok": all(s["ok"] for s in steps)}
+
+
+@app.get("/api/probe-endpoints")
+def api_probe_endpoints():
+    """판매/구매 조회 API의 올바른 경로를 찾기 위해 후보 경로들을 직접 호출하고
+    HTTP 상태·응답 일부를 반환한다(진단용). 200이면 정답 경로."""
+    if settings.demo_mode:
+        return {"ok": False, "detail": "데모 모드"}
+    import time
+    from datetime import date, timedelta
+    from .ecount_client import EcountClient
+    today = date.today()
+    base = today.strftime("%Y%m%d")
+    month_ago = (today - timedelta(days=30)).strftime("%Y%m%d")
+    candidates = [
+        "/OAPI/V2/Sale/GetListSaleStatus",
+        "/OAPI/V2/Sale/GetSaleList",
+        "/OAPI/V2/Sale/GetListSales",
+        "/OAPI/V2/Sales/GetListSalesStatus",
+        "/OAPI/V2/Sale/GetBasicSaleList",
+        "/OAPI/V2/SaleBasic/GetListSale",
+        "/OAPI/V2/Sale/GetListSaleSlip",
+        "/OAPI/V2/Purchases/GetListPurchasesStatus",
+        "/OAPI/V2/Purchases/GetPurchasesList",
+        "/OAPI/V2/Purchase/GetListPurchase",
+    ]
+    client = EcountClient(
+        com_code=settings.com_code, user_id=settings.user_id,
+        api_cert_key=settings.api_cert_key, zone=settings.zone,
+        use_test_server=settings.use_test_server, proxy=settings.ecount_proxy,
+    )
+    out = []
+    try:
+        client.login()
+        body = {"FROM_DATE": month_ago, "TO_DATE": base}
+        for path in candidates:
+            url = f"{client.base_url}{path}?SESSION_ID={client.session_id}"
+            try:
+                r = client._http.post(url, json=body)
+                out.append({"path": path, "http": r.status_code, "snippet": r.text[:120]})
+            except Exception as e:
+                out.append({"path": path, "error": str(e)[:120]})
+            time.sleep(1.1)
+    finally:
+        client.close()
+    return {"results": out}
 
 
 @app.get("/")
