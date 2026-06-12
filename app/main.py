@@ -186,12 +186,8 @@ def api_probe_endpoints():
         "/OAPI/V2/Sale/GetSaleList",
         "/OAPI/V2/Sale/GetListSales",
         "/OAPI/V2/Sales/GetListSalesStatus",
-        "/OAPI/V2/Sale/GetBasicSaleList",
         "/OAPI/V2/SaleBasic/GetListSale",
-        "/OAPI/V2/Sale/GetListSaleSlip",
-        "/OAPI/V2/Purchases/GetListPurchasesStatus",
-        "/OAPI/V2/Purchases/GetPurchasesList",
-        "/OAPI/V2/Purchase/GetListPurchase",
+        "/OAPI/V2/Sale/GetBasicSaleList",
     ]
     client = EcountClient(
         com_code=settings.com_code, user_id=settings.user_id,
@@ -209,7 +205,7 @@ def api_probe_endpoints():
                 out.append({"path": path, "http": r.status_code, "snippet": r.text[:120]})
             except Exception as e:
                 out.append({"path": path, "error": str(e)[:120]})
-            time.sleep(1.1)
+            time.sleep(0.5)
     finally:
         client.close()
     return {"results": out}
