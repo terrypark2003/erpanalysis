@@ -24,7 +24,7 @@ _lock = threading.Lock()
 _state: dict = {"result": None, "error": None}
 
 # 진단용 경로는 비밀번호 없이 허용(영업 데이터 미포함)
-_OPEN_PATHS = {"/api/status", "/api/test-connection"}
+_OPEN_PATHS = {"/api/status", "/api/test-connection", "/api/test-collect"}
 
 
 @app.middleware("http")
@@ -125,6 +125,48 @@ def api_test_connection():
             "detail": ".env에 ECOUNT_COM_CODE / ECOUNT_USER_ID / ECOUNT_API_CERT_KEY를 설정하세요.",
         }]}
     return test_connection(settings)
+
+
+@app.get("/api/test-collect")
+def api_test_collect():
+    """전체 수집 경로(품목/재고/판매/구매)를 각 1회 시험 호출해 단계별 행수·오류만
+    반환한다. 실제 영업 데이터는 반환하지 않으므로 진단용으로 열어둔다."""
+    if settings.demo_mode:
+        return {"ok": False, "steps": [
+            {"step": "0. 모드", "ok": False, "detail": "데모 모드입니다. 인증정보를 설정하세요."}]}
+    from datetime import date, timedelta
+    from .ecount_client import EcountClient
+    today = date.today()
+    base = today.strftime("%Y%m%d")
+    month_ago = (today - timedelta(days=30)).strftime("%Y%m%d")
+    client = EcountClient(
+        com_code=settings.com_code, user_id=settings.user_id,
+        api_cert_key=settings.api_cert_key, zone=settings.zone,
+        use_test_server=settings.use_test_server, proxy=settings.ecount_proxy,
+    )
+    steps = []
+    try:
+        try:
+            client.login()
+            steps.append({"step": "로그인", "ok": True, "detail": "세션 발급"})
+        except Exception as e:
+            steps.append({"step": "로그인", "ok": False, "detail": str(e)[:300]})
+            return {"steps": steps, "ok": False}
+        probes = [
+            ("products(품목)", "products", {"PROD_CD": "", "BASE_DATE": base}),
+            ("inventory(재고)", "inventory_balance", {"BASE_DATE": base}),
+            ("sales(판매·최근30일)", "sales", {"FROM_DATE": month_ago, "TO_DATE": base}),
+            ("purchases(구매·최근30일)", "purchases", {"FROM_DATE": month_ago, "TO_DATE": base}),
+        ]
+        for label, key, body in probes:
+            try:
+                rows = client.call(key, body)
+                steps.append({"step": label, "ok": True, "detail": f"{len(rows)}행 수신"})
+            except Exception as e:
+                steps.append({"step": label, "ok": False, "detail": str(e)[:300]})
+    finally:
+        client.close()
+    return {"steps": steps, "ok": all(s["ok"] for s in steps)}
 
 
 @app.get("/")
