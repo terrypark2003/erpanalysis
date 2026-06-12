@@ -240,89 +240,57 @@ def fetch_dataset(settings) -> dict[str, Any]:
             # 품목 API가 막혀 있어도 재고/판매 데이터만으로 분석 가능
             items = []
 
-        # 2) 현재고
-        stock = []
-        rows = client.call("inventory_balance", {"BASE_DATE": base_date})
-        for r in rows:
-            code = str(pick(r, "prod_cd", "")).strip()
-            if not code:
-                continue
-            stock.append({"code": code, "qty": _to_float(pick(r, "bal_qty"))})
-            if not any(it["code"] == code for it in items):
-                items.append({
-                    "code": code, "name": str(pick(r, "prod_des", code)),
-                    "spec": "", "unit": "", "category": "(미분류)",
-                    "in_price": 0, "out_price": 0,
-                })
-
-        # 3) 판매 내역(월 단위로 분할 조회 — 호출당 데이터량 제한 대응)
-        transactions: list[dict] = []
-        start = as_of - timedelta(days=settings.analysis_months * 31 + 31)
-        cursor = date(start.year, start.month, 1)
-        sales_error: str | None = None
-        while cursor <= as_of:
-            if cursor.month == 12:
-                month_end = date(cursor.year, 12, 31)
-            else:
-                month_end = date(cursor.year, cursor.month + 1, 1) - timedelta(days=1)
-            month_end = min(month_end, as_of)
-            body = {
-                "FROM_DATE": cursor.strftime("%Y%m%d"),
-                "TO_DATE": month_end.strftime("%Y%m%d"),
-            }
+        # 2) 재고 스냅샷 — 최근 ~84일을 약 3주 간격으로 여러 시점 조회한다.
+        #    ECOUNT는 과거 기준일 재고조회를 약 3개월까지만 허용하므로 그 범위에서만 본다.
+        price_in = {it["code"]: it["in_price"] for it in items}
+        price_out = {it["code"]: it["out_price"] for it in items}
+        snapshots: list[tuple[date, dict[str, float]]] = []
+        for days_ago in (84, 63, 42, 21, 0):
+            d = as_of - timedelta(days=days_ago)
             try:
-                rows = client.call("sales", body)
-            except EcountApiError as e:
-                sales_error = str(e)
-                break
+                rows = client.call("inventory_balance", {"BASE_DATE": d.strftime("%Y%m%d")})
+            except EcountApiError:
+                continue  # 너무 과거라 거부(412)되면 해당 시점은 건너뛴다
+            snap: dict[str, float] = {}
             for r in rows:
                 code = str(pick(r, "prod_cd", "")).strip()
-                d = _normalize_date(pick(r, "io_date"))
-                if not code or not d:
+                if not code:
                     continue
-                transactions.append({
-                    "date": d, "code": code, "io": "OUT",
-                    "qty": _to_float(pick(r, "qty")),
-                    "amount": _to_float(pick(r, "amount")),
-                })
-            cursor = date(month_end.year, month_end.month, 1) + timedelta(days=32)
-            cursor = date(cursor.year, cursor.month, 1)
-
-        if sales_error and not transactions:
-            raise EcountApiError(
-                "판매조회",
-                "판매현황 API 호출에 실패했습니다. ECOUNT OpenAPI 가이드에서 판매 조회 "
-                "API의 정확한 경로를 확인해 app/ecount_client.py의 ENDPOINTS['sales']를 "
-                f"수정하세요. 원인: {sales_error}",
-            )
-
-        # 4) 구매(입고) 내역 — 선택적. 실패해도 무시(평균재고 추정 정밀도만 떨어짐)
-        cursor = date(start.year, start.month, 1)
-        try:
-            while cursor <= as_of:
-                if cursor.month == 12:
-                    month_end = date(cursor.year, 12, 31)
-                else:
-                    month_end = date(cursor.year, cursor.month + 1, 1) - timedelta(days=1)
-                month_end = min(month_end, as_of)
-                rows = client.call("purchases", {
-                    "FROM_DATE": cursor.strftime("%Y%m%d"),
-                    "TO_DATE": month_end.strftime("%Y%m%d"),
-                })
-                for r in rows:
-                    code = str(pick(r, "prod_cd", "")).strip()
-                    d = _normalize_date(pick(r, "io_date"))
-                    if not code or not d:
-                        continue
-                    transactions.append({
-                        "date": d, "code": code, "io": "IN",
-                        "qty": _to_float(pick(r, "qty")),
-                        "amount": _to_float(pick(r, "amount")),
+                snap[code] = _to_float(pick(r, "bal_qty"))
+                if code not in price_out:  # 품목 API에 없던 코드 보강
+                    items.append({
+                        "code": code, "name": str(pick(r, "prod_des", code)),
+                        "spec": "", "unit": "", "category": "(미분류)",
+                        "in_price": 0, "out_price": 0,
                     })
-                cursor = date(month_end.year, month_end.month, 1) + timedelta(days=32)
-                cursor = date(cursor.year, cursor.month, 1)
-        except EcountApiError:
-            pass
+                    price_in[code] = 0.0
+                    price_out[code] = 0.0
+            snapshots.append((d, snap))
+
+        if not snapshots:
+            raise EcountApiError("재고조회", "재고현황을 한 건도 받지 못했습니다.")
+        snapshots.sort(key=lambda x: x[0])  # 과거 → 현재 순
+
+        # 현재고 = 가장 최근 스냅샷
+        stock = [{"code": c, "qty": q} for c, q in snapshots[-1][1].items()]
+
+        # 3) 재고 변동을 합성 거래로 환산: 감소=출고(판매), 증가=입고(구매).
+        #    판매 조회 API가 없는 ECOUNT 구조라, 시점 간 재고 차이로 출고량을 추정한다.
+        transactions: list[dict] = []
+        for (_d_prev, sp), (d_cur, sc) in zip(snapshots, snapshots[1:]):
+            iso = d_cur.isoformat()
+            for code in set(sp) | set(sc):
+                delta = sp.get(code, 0.0) - sc.get(code, 0.0)
+                if delta > 0:  # 재고가 줄었다 = 빠져나감(판매)
+                    transactions.append({
+                        "date": iso, "code": code, "io": "OUT",
+                        "qty": delta, "amount": delta * price_out.get(code, 0.0),
+                    })
+                elif delta < 0:  # 재고가 늘었다 = 입고(구매)
+                    transactions.append({
+                        "date": iso, "code": code, "io": "IN",
+                        "qty": -delta, "amount": -delta * price_in.get(code, 0.0),
+                    })
 
         return {
             "as_of": as_of.isoformat(),
