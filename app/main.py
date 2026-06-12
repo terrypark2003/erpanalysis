@@ -24,7 +24,8 @@ _lock = threading.Lock()
 _state: dict = {"result": None, "error": None}
 
 # 진단용 경로는 비밀번호 없이 허용(영업 데이터 미포함)
-_OPEN_PATHS = {"/api/status", "/api/test-connection", "/api/test-collect", "/api/probe-endpoints"}
+_OPEN_PATHS = {"/api/status", "/api/test-connection", "/api/test-collect",
+               "/api/probe-endpoints", "/api/test-history"}
 
 
 @app.middleware("http")
@@ -209,6 +210,41 @@ def api_probe_endpoints():
     finally:
         client.close()
     return {"results": out}
+
+
+@app.get("/api/test-history")
+def api_test_history():
+    """재고현황을 과거 기준일(BASE_DATE)로 조회해 시점별 총재고수량을 비교한다.
+    시점마다 총량이 다르면 '기준일 조회'가 지원되는 것 → 재고 변동으로 출고(판매)를
+    역산할 수 있다. 진단용(실데이터 미반환, 합계만)."""
+    if settings.demo_mode:
+        return {"ok": False, "detail": "데모 모드"}
+    from datetime import date, timedelta
+    from .ecount_client import EcountClient, pick, _to_float
+    client = EcountClient(
+        com_code=settings.com_code, user_id=settings.user_id,
+        api_cert_key=settings.api_cert_key, zone=settings.zone,
+        use_test_server=settings.use_test_server, proxy=settings.ecount_proxy,
+    )
+    today = date.today()
+    targets = [("현재", today),
+               ("90일전", today - timedelta(days=90)),
+               ("180일전", today - timedelta(days=180))]
+    out = []
+    try:
+        client.login()
+        for label, d in targets:
+            try:
+                rows = client.call("inventory_balance", {"BASE_DATE": d.strftime("%Y%m%d")})
+                total = round(sum(_to_float(pick(r, "bal_qty")) for r in rows), 1)
+                out.append({"기준일": d.isoformat(), "라벨": label,
+                            "품목수": len(rows), "총재고수량": total})
+            except Exception as e:
+                out.append({"기준일": d.isoformat(), "error": str(e)[:200]})
+    finally:
+        client.close()
+    return {"results": out,
+            "해석": "총재고수량이 기준일마다 다르면 과거조회 지원 → 출고 역산 가능"}
 
 
 @app.get("/")
