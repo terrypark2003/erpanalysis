@@ -63,6 +63,7 @@
       <button class="tab" data-tab="trend">판매 추세</button>
       <button class="tab" data-tab="reorder">발주 제안</button>
       <button class="tab" data-tab="all">품목 전체</button>
+      <button class="tab" data-tab="prices">단가 관리</button>
     </nav>
 
     <!-- 종합 -->
@@ -176,6 +177,29 @@
           <button class="btn btn-small" id="btn-csv-all">CSV 다운로드</button>
         </div>
         <div class="table-wrap"><table id="table-all"></table></div>
+      </div>
+    </section>
+
+    <!-- 단가 관리 -->
+    <section class="panel" id="panel-prices">
+      <div class="card">
+        <h2>단가 관리 <span class="muted small">— ECOUNT에 단가가 없는 품목의 원가·판매가를 직접 입력하면 금액 지표(재고자산·ABC·마진)가 살아납니다</span></h2>
+        <div class="filter-row">
+          <input type="search" id="search-prices" placeholder="품목명·코드·카테고리 검색">
+          <span id="price-count" class="muted small"></span>
+          <button class="btn btn-small" id="btn-price-csv">CSV 양식 내려받기</button>
+          <button class="btn btn-small" id="btn-price-import">CSV 업로드</button>
+          <input type="file" id="file-price-csv" accept=".csv,text/csv" style="display:none">
+          <button class="btn btn-small" id="btn-price-clear">전체 초기화</button>
+          <button class="btn" id="btn-price-save">저장 후 재계산</button>
+        </div>
+        <div class="table-wrap"><table id="table-prices"></table></div>
+        <p class="muted small">
+          입력한 단가는 이 브라우저(localStorage)에 저장되며 서버에는 남지 않습니다.
+          다른 PC에서도 쓰려면 [CSV 양식 내려받기]로 받아 그쪽에서 [CSV 업로드] 하세요.
+          많은 품목은 CSV를 엑셀로 열어 단가 열만 채운 뒤 업로드하는 게 가장 빠릅니다.
+          ECOUNT 품목등록에 단가를 입력하면 모든 곳에 자동 반영되므로 장기적으로는 그 방법을 권장합니다.
+        </p>
       </div>
     </section>
 

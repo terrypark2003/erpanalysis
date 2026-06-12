@@ -237,3 +237,13 @@ tbody tr:hover { background: #f6f9ff; }
 }
 
 canvas { max-width: 100%; }
+
+.price-input {
+  width: 110px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: right;
+}
+.price-input:focus { outline: 2px solid var(--primary-soft); border-color: var(--primary); }

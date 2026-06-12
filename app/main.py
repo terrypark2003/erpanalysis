@@ -6,7 +6,7 @@ import secrets
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
@@ -61,14 +61,48 @@ def _require_protection():
         )
 
 
-def _build(force_refresh: bool = False) -> dict:
+def _sanitize_overrides(raw) -> dict[str, dict[str, float]]:
+    """사용자 단가 입력을 {code: {in_price/out_price: 양수}}로 정제한다."""
+    clean: dict[str, dict[str, float]] = {}
+    if not isinstance(raw, dict):
+        return clean
+    for code, v in raw.items():
+        if not isinstance(v, dict):
+            continue
+        entry = {}
+        for f in ("in_price", "out_price"):
+            try:
+                p = float(v.get(f))
+            except (TypeError, ValueError):
+                continue
+            if p > 0:
+                entry[f] = p
+        if entry:
+            clean[str(code)] = entry
+    return clean
+
+
+def _build(force_refresh: bool = False, overrides: dict | None = None) -> dict:
     dataset = providers.fetch_dataset(settings, force_refresh=force_refresh)
+    applied = 0
+    if overrides:
+        # ECOUNT에 단가가 없는 계정 대응: 사용자가 입력한 단가를 품목에 덮어쓴다.
+        # 합성 출고 거래의 amount는 0이라 분석엔진이 품목 단가로 다시 계산한다.
+        items = []
+        for it in dataset.get("items", []):
+            ov = overrides.get(it["code"])
+            if ov:
+                it = {**it, **ov}
+                applied += 1
+            items.append(it)
+        dataset = {**dataset, "items": items}
     result = AnalysisEngine(dataset, settings).run()
     result["meta"] = {
         "source": dataset.get("source", "demo"),
         "fetched_at": dataset.get("fetched_at"),
         "demo_mode": settings.demo_mode,
         "tx_count": len(dataset.get("transactions", [])),
+        "price_override_count": applied,
     }
     return result
 
@@ -86,6 +120,26 @@ def api_dashboard():
             except Exception as e:
                 raise HTTPException(status_code=500, detail=f"분석 실패: {e}")
         return JSONResponse(_state["result"])
+
+
+@app.post("/api/dashboard")
+def api_dashboard_with_prices(payload: dict = Body(default_factory=dict)):
+    """브라우저에 저장된 사용자 단가를 반영해 재계산한 대시보드를 반환.
+    단가가 없으면 GET과 동일하게 캐시된 결과를 준다."""
+    _require_protection()
+    overrides = _sanitize_overrides((payload or {}).get("price_overrides"))
+    with _lock:
+        try:
+            if not overrides:
+                if _state["result"] is None:
+                    _state["result"] = _build()
+                return JSONResponse(_state["result"])
+            # 데이터 수집은 캐시를 쓰고 분석만 다시 돌리므로 빠르다(<1초)
+            return JSONResponse(_build(overrides=overrides))
+        except EcountApiError as e:
+            raise HTTPException(status_code=502, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"분석 실패: {e}")
 
 
 @app.post("/api/refresh")

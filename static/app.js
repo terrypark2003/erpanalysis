@@ -342,6 +342,7 @@ function renderTables() {
     `— 현재고 ≤ 재주문점 · 리드타임 ${DATA.params.lead_time_days}일 · 서비스수준 ${Math.round(DATA.params.service_level * 100)}%`;
 
   renderAllTable();
+  renderPricesTable();
 }
 
 function renderStagnantTable() {
@@ -363,6 +364,131 @@ function renderAllTable() {
     [COL.name, COL.curQty, COL.stockAmt, COL.turnover, COL.doi, COL.stockout,
      COL.abc, COL.grade, COL.trend, COL.cross, COL.action],
     rows, { defaultSort: "stock_amount" });
+}
+
+/* ---------- 단가 관리(브라우저 저장 오버라이드) ---------- */
+const PRICE_KEY = "price_overrides_v1";
+let priceDraft = null; // 입력 중 값(저장 전). null이면 아직 미초기화
+
+function loadPriceOverrides() {
+  try { return JSON.parse(localStorage.getItem(PRICE_KEY) || "{}"); }
+  catch { return {}; }
+}
+
+function updatePriceCount() {
+  const saved = Object.keys(loadPriceOverrides()).length;
+  const draft = Object.keys(priceDraft || {}).length;
+  const el = document.getElementById("price-count");
+  el.textContent = `저장된 단가 ${saved}개` +
+    (draft !== saved ? ` · 입력 중 ${draft}개 (저장 버튼을 누르세요)` : "");
+}
+
+function renderPricesTable() {
+  if (priceDraft === null) priceDraft = loadPriceOverrides();
+  const q = (document.getElementById("search-prices").value || "").trim().toLowerCase();
+  const rows = !q ? DATA.items : DATA.items.filter((r) =>
+    (r.name + r.code + r.category).toLowerCase().includes(q));
+  const el = document.getElementById("table-prices");
+  let html = "<thead><tr><th class='left'>품목</th><th>현재 구매단가</th><th>현재 판매단가</th>" +
+    "<th>내 구매단가(원가)</th><th>내 판매단가</th></tr></thead><tbody>";
+  for (const r of rows) {
+    const d = priceDraft[r.code] || {};
+    html += `<tr><td class="left">${nameCell(r)}</td>` +
+      `<td>${r.in_price > 0 ? fmtMoney(r.in_price) : '<span class="muted">미등록</span>'}</td>` +
+      `<td>${r.out_price > 0 ? fmtMoney(r.out_price) : '<span class="muted">미등록</span>'}</td>` +
+      `<td><input type="number" min="0" step="any" class="price-input" data-code="${r.code}" data-field="in_price" value="${d.in_price ?? ""}"></td>` +
+      `<td><input type="number" min="0" step="any" class="price-input" data-code="${r.code}" data-field="out_price" value="${d.out_price ?? ""}"></td></tr>`;
+  }
+  if (!rows.length) html += `<tr><td class="left" colspan="5" style="color:#9ca3af">해당 품목이 없습니다.</td></tr>`;
+  html += "</tbody>";
+  el.innerHTML = html;
+  el.querySelectorAll(".price-input").forEach((inp) => {
+    inp.addEventListener("change", () => {
+      const code = inp.dataset.code, field = inp.dataset.field;
+      const v = parseFloat(inp.value);
+      if (!priceDraft[code]) priceDraft[code] = {};
+      if (v > 0) priceDraft[code][field] = v;
+      else delete priceDraft[code][field];
+      if (!Object.keys(priceDraft[code]).length) delete priceDraft[code];
+      updatePriceCount();
+    });
+  });
+  updatePriceCount();
+}
+
+/* 따옴표·쉼표가 든 품목명도 안전하게 읽는 단순 CSV 파서 */
+function parseCsv(text) {
+  const rows = [];
+  let row = [], field = "", inQ = false;
+  const s = text.replace(/^﻿/, "");
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inQ) {
+      if (c === '"') { if (s[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n" || c === "\r") {
+      if (c === "\r" && s[i + 1] === "\n") i++;
+      row.push(field); field = "";
+      if (row.length > 1 || row[0] !== "") rows.push(row);
+      row = [];
+    } else field += c;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+function bindPriceEvents() {
+  document.getElementById("search-prices").addEventListener("input", renderPricesTable);
+
+  document.getElementById("btn-price-save").onclick = async () => {
+    localStorage.setItem(PRICE_KEY, JSON.stringify(priceDraft || {}));
+    await loadDashboard(); // 저장된 단가로 서버 재계산 → 전체 화면 갱신
+  };
+
+  document.getElementById("btn-price-clear").onclick = async () => {
+    if (!confirm("입력한 단가를 모두 삭제할까요? (ECOUNT 단가로 되돌아갑니다)")) return;
+    priceDraft = {};
+    localStorage.removeItem(PRICE_KEY);
+    await loadDashboard();
+  };
+
+  document.getElementById("btn-price-csv").onclick = () => {
+    const ov = priceDraft || loadPriceOverrides();
+    downloadCsv("단가입력_양식.csv", ["품목코드", "품목명", "구매단가(원가)", "판매단가"],
+      DATA.items.map((r) => {
+        const d = ov[r.code] || {};
+        return [r.code, r.name,
+          d.in_price ?? (r.in_price > 0 ? r.in_price : ""),
+          d.out_price ?? (r.out_price > 0 ? r.out_price : "")];
+      }));
+  };
+
+  document.getElementById("btn-price-import").onclick = () =>
+    document.getElementById("file-price-csv").click();
+  document.getElementById("file-price-csv").addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const text = await file.text();
+    e.target.value = "";
+    const codes = new Set(DATA.items.map((r) => r.code));
+    priceDraft = priceDraft || loadPriceOverrides();
+    let applied = 0;
+    for (const cols of parseCsv(text)) {
+      const code = (cols[0] || "").trim();
+      if (!code || !codes.has(code)) continue; // 헤더·알 수 없는 코드 제외
+      const ip = parseFloat(String(cols[2] ?? "").replace(/,/g, ""));
+      const op = parseFloat(String(cols[3] ?? "").replace(/,/g, ""));
+      const entry = {};
+      if (ip > 0) entry.in_price = ip;
+      if (op > 0) entry.out_price = op;
+      if (Object.keys(entry).length) { priceDraft[code] = entry; applied++; }
+    }
+    localStorage.setItem(PRICE_KEY, JSON.stringify(priceDraft));
+    alert(`${applied}개 품목의 단가를 불러와 저장했습니다.`);
+    await loadDashboard();
+  });
 }
 
 /* ---------- CSV 핸들러 ---------- */
@@ -427,7 +553,14 @@ function showError(msg) {
 
 async function loadDashboard() {
   document.getElementById("error-box").classList.add("hidden");
-  const res = await fetch("/api/dashboard");
+  const ov = loadPriceOverrides();
+  const res = Object.keys(ov).length
+    ? await fetch("/api/dashboard", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ price_overrides: ov }),
+      })
+    : await fetch("/api/dashboard");
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     document.getElementById("loading").classList.add("hidden");
@@ -465,6 +598,7 @@ async function loadDashboard() {
 }
 
 bindEvents();
+bindPriceEvents();
 loadDashboard().catch((e) => {
   document.getElementById("loading").classList.add("hidden");
   showError("대시보드 초기화 실패: " + e.message);
