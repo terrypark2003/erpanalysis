@@ -320,16 +320,24 @@ class AnalysisEngine:
 
     # ------------------------------------------------------------------
     def _assign_abc(self, rows: list[dict]) -> None:
-        """기간 출고금액 기준 누적 점유율로 A/B/C 부여(매출 없으면 C)."""
-        total = sum(r["out_amount"] for r in rows)
-        ordered = sorted(rows, key=lambda r: r["out_amount"], reverse=True)
+        """누적 점유율로 A/B/C 부여. 기본은 출고금액 기준이되, 단가 미등록으로
+        금액이 잡히는 품목이 판매 품목의 70% 미만이면 출고수량 기준으로 전환한다
+        (일부 품목만 단가가 있으면 금액 랭킹이 왜곡되므로)."""
+        sellers = [r for r in rows if r["out_qty"] > 0]
+        covered = [r for r in sellers if r["out_amount"] > 0]
+        use_amount = bool(sellers) and len(covered) >= 0.7 * len(sellers)
+        metric = "out_amount" if use_amount else "out_qty"
+        self.abc_basis = "amount" if use_amount else "qty"
+
+        total = sum(r[metric] for r in rows)
+        ordered = sorted(rows, key=lambda r: r[metric], reverse=True)
         cum = 0.0
         for r in ordered:
-            if total <= 0 or r["out_amount"] <= 0:
+            if total <= 0 or r[metric] <= 0:
                 r["abc"] = "C"
                 r["cum_share"] = None
                 continue
-            cum += r["out_amount"]
+            cum += r[metric]
             share = cum / total
             r["cum_share"] = round(share, 4)
             if share <= self.cfg.abc_a_cut:
@@ -339,7 +347,7 @@ class AnalysisEngine:
             else:
                 r["abc"] = "C"
         # 최상위 1개 품목이 단독으로 80%를 넘는 경우도 A가 되도록 보정
-        if ordered and total > 0 and ordered[0]["out_amount"] > 0:
+        if ordered and total > 0 and ordered[0][metric] > 0:
             ordered[0]["abc"] = "A"
 
     # ------------------------------------------------------------------
@@ -372,11 +380,17 @@ class AnalysisEngine:
 
         total_stock_amount = sum(r["stock_amount"] for r in rows)
         total_out_amount = sum(r["out_amount"] for r in rows)
-        # 전사 가중 회전율: 총 출고금액(연환산) ÷ 총 평균재고금액
+        # 전사 가중 회전율: 총 출고금액(연환산) ÷ 총 평균재고금액.
+        # 단가 미등록으로 금액이 없으면 수량 가중으로 폴백한다.
         total_avg_stock_amt = sum(r["avg_stock_qty"] * r["in_price"] for r in rows)
         annual_factor = 365.0 / self.period_days
-        overall_turnover = (total_out_amount * annual_factor / total_avg_stock_amt) \
-            if total_avg_stock_amt > 0 else None
+        if total_avg_stock_amt > 0:
+            overall_turnover = total_out_amount * annual_factor / total_avg_stock_amt
+        else:
+            total_out_qty = sum(r["out_qty"] for r in rows)
+            total_avg_stock_qty = sum(r["avg_stock_qty"] for r in rows)
+            overall_turnover = (total_out_qty * annual_factor / total_avg_stock_qty) \
+                if total_avg_stock_qty > 0 else None
 
         stagnant_rows = [r for r in rows if r["stagnant_grade"] in (GRADE_STAGNANT, GRADE_DEAD)]
         dead_rows = [r for r in rows if r["stagnant_grade"] == GRADE_DEAD]
@@ -385,9 +399,10 @@ class AnalysisEngine:
 
         abc_counts = {"A": 0, "B": 0, "C": 0}
         abc_amounts = {"A": 0.0, "B": 0.0, "C": 0.0}
+        abc_metric = "out_amount" if getattr(self, "abc_basis", "amount") == "amount" else "out_qty"
         for r in rows:
             abc_counts[r["abc"]] += 1
-            abc_amounts[r["abc"]] += r["out_amount"]
+            abc_amounts[r["abc"]] += r[abc_metric]
 
         reorder_rows = [r for r in rows if r["need_reorder"]]
         imminent = [r for r in rows
@@ -408,6 +423,7 @@ class AnalysisEngine:
             "imminent_stockout_count": len(imminent),
             "abc_counts": abc_counts,
             "abc_amounts": {k: round(v) for k, v in abc_amounts.items()},
+            "abc_basis": getattr(self, "abc_basis", "amount"),
             "monthly_out_qty": [round(v, 1) for v in monthly_qty],
             "monthly_out_amt": [round(v) for v in monthly_amt],
             "trend_up_count": sum(1 for r in rows if r["trend"] == TREND_UP),

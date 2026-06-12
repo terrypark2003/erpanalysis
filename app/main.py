@@ -25,8 +25,7 @@ _state: dict = {"result": None, "error": None}
 
 # 진단용 경로는 비밀번호 없이 허용(영업 데이터 미포함)
 _OPEN_PATHS = {"/api/status", "/api/test-connection", "/api/test-collect",
-               "/api/probe-endpoints", "/api/test-history", "/api/test-build",
-               "/api/test-fields"}
+               "/api/probe-endpoints", "/api/test-history", "/api/test-build"}
 
 
 @app.middleware("http")
@@ -246,34 +245,6 @@ def api_test_history():
         client.close()
     return {"results": out,
             "해석": "총재고수량이 기준일마다 다르면 과거조회 지원 → 출고 역산 가능"}
-
-
-@app.get("/api/test-fields")
-def api_test_fields():
-    """품목/재고 응답의 실제 필드명을 확인하기 위해 첫 행을 그대로 반환(진단용,
-    확인 후 즉시 제거). 가격/재고금액 필드명을 파악하는 용도."""
-    if settings.demo_mode:
-        return {"ok": False, "detail": "데모 모드"}
-    from datetime import date
-    from .ecount_client import EcountClient
-    client = EcountClient(
-        com_code=settings.com_code, user_id=settings.user_id,
-        api_cert_key=settings.api_cert_key, zone=settings.zone,
-        use_test_server=settings.use_test_server, proxy=settings.ecount_proxy,
-    )
-    try:
-        client.login()
-        base = date.today().strftime("%Y%m%d")
-        prod = client.call("products", {"PROD_CD": "", "BASE_DATE": base})
-        inv = client.call("inventory_balance", {"BASE_DATE": base})
-        return {
-            "product_keys": sorted((prod[0] if prod else {}).keys()),
-            "product_sample": prod[0] if prod else None,
-            "inventory_keys": sorted((inv[0] if inv else {}).keys()),
-            "inventory_sample": inv[0] if inv else None,
-        }
-    finally:
-        client.close()
 
 
 @app.get("/api/test-build")

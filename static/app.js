@@ -159,7 +159,8 @@ function renderCharts() {
     options: {
       plugins: {
         legend: { position: "bottom" },
-        tooltip: { callbacks: { label: (c) => ` ${c.label}: ${fmtMoneyShort(c.raw)}` } },
+        tooltip: { callbacks: { label: (c) =>
+          ` ${c.label}: ${s.abc_basis === "qty" ? fmtNum(c.raw) + "개" : fmtMoneyShort(c.raw)}` } },
       },
     },
   });
@@ -244,8 +245,14 @@ function renderTrendChart(mode) {
 /* ---------- KPI ---------- */
 function renderKpis() {
   const s = DATA.summary;
-  document.getElementById("kpi-stock-amount").textContent = fmtMoneyShort(s.total_stock_amount);
-  document.getElementById("kpi-item-count").textContent = `분석 품목 ${fmtNum(s.item_count)}개`;
+  if (s.total_stock_amount > 0) {
+    document.getElementById("kpi-stock-amount").textContent = fmtMoneyShort(s.total_stock_amount);
+    document.getElementById("kpi-item-count").textContent = `분석 품목 ${fmtNum(s.item_count)}개`;
+  } else {
+    document.getElementById("kpi-stock-amount").textContent = "—";
+    document.getElementById("kpi-item-count").textContent =
+      `분석 품목 ${fmtNum(s.item_count)}개 · 단가 미등록(품목등록에 단가 입력 시 금액 표시)`;
+  }
   document.getElementById("kpi-turnover").textContent =
     s.overall_turnover === null ? "-" : s.overall_turnover.toFixed(1) + "회/년";
   document.getElementById("kpi-doi").textContent =
@@ -309,8 +316,9 @@ function renderTables() {
     abcItems, { defaultSort: "out_amount" });
 
   const abcS = DATA.summary;
+  const abcVal = (v) => abcS.abc_basis === "qty" ? `출고 ${fmtNum(v)}개` : `매출 ${fmtMoneyShort(v)}`;
   document.getElementById("abc-summary").innerHTML = ["A", "B", "C"].map((g) =>
-    `<div class="abc-pill">${abcChip(g)} <b>${abcS.abc_counts[g]}</b>개 품목 · 매출 ${fmtMoneyShort(abcS.abc_amounts[g])}</div>`
+    `<div class="abc-pill">${abcChip(g)} <b>${abcS.abc_counts[g]}</b>개 품목 · ${abcVal(abcS.abc_amounts[g])}</div>`
   ).join("");
 
   renderStagnantTable();
