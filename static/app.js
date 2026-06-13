@@ -3,6 +3,7 @@
 
 let DATA = null;
 const charts = {};
+const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 /* ---------- 포맷 유틸 ---------- */
 const nf = new Intl.NumberFormat("ko-KR");
@@ -135,8 +136,8 @@ function renderCharts() {
       datasets: [{
         label: "월별 출고금액",
         data: s.monthly_out_amt,
-        borderColor: "#2563eb",
-        backgroundColor: "rgba(37,99,235,.12)",
+        borderColor: cssVar("--c-line"),
+        backgroundColor: cssVar("--c-fill"),
         fill: true,
         tension: 0.3,
       }],
@@ -153,7 +154,7 @@ function renderCharts() {
       labels: ["A등급", "B등급", "C등급"],
       datasets: [{
         data: [s.abc_amounts.A, s.abc_amounts.B, s.abc_amounts.C],
-        backgroundColor: ["#2563eb", "#94a3b8", "#c4b5fd"],
+        backgroundColor: [cssVar("--c-a"), cssVar("--c-b"), cssVar("--c-c")],
       }],
     },
     options: {
@@ -179,7 +180,7 @@ function renderCharts() {
     type: "bar",
     data: {
       labels: top.map((r) => r.name),
-      datasets: [{ data: top.map((r) => r.turnover), backgroundColor: "#16a34a" }],
+      datasets: [{ data: top.map((r) => r.turnover), backgroundColor: cssVar("--c-pos") }],
     },
     options: barOpts,
   });
@@ -187,7 +188,7 @@ function renderCharts() {
     type: "bar",
     data: {
       labels: bottom.map((r) => r.name),
-      datasets: [{ data: bottom.map((r) => r.turnover), backgroundColor: "#dc2626" }],
+      datasets: [{ data: bottom.map((r) => r.turnover), backgroundColor: cssVar("--c-neg") }],
     },
     options: barOpts,
   });
@@ -202,9 +203,9 @@ function renderCharts() {
       labels: byAmt.map((r) => r.name),
       datasets: [
         { type: "bar", label: "출고금액", data: byAmt.map((r) => r.out_amount),
-          backgroundColor: byAmt.map((r) => r.abc === "A" ? "#2563eb" : r.abc === "B" ? "#94a3b8" : "#c4b5fd"),
+          backgroundColor: byAmt.map((r) => r.abc === "A" ? cssVar("--c-a") : r.abc === "B" ? cssVar("--c-b") : cssVar("--c-c")),
           yAxisID: "y" },
-        { type: "line", label: "누적 점유율(%)", data: cumPct, borderColor: "#dc2626",
+        { type: "line", label: "누적 점유율(%)", data: cumPct, borderColor: cssVar("--c-accent"),
           yAxisID: "y2", tension: 0.2, pointRadius: 2 },
       ],
     },
@@ -229,8 +230,8 @@ function renderTrendChart(mode) {
       datasets: [{
         label: mode === "amt" ? "출고금액" : "출고수량",
         data: mode === "amt" ? s.monthly_out_amt : s.monthly_out_qty,
-        borderColor: "#2563eb",
-        backgroundColor: "rgba(37,99,235,.12)",
+        borderColor: cssVar("--c-line"),
+        backgroundColor: cssVar("--c-fill"),
         fill: true,
         tension: 0.3,
       }],
@@ -597,6 +598,24 @@ async function loadDashboard() {
   document.getElementById("dashboard").classList.remove("hidden");
 }
 
+/* ---------- 디자인 테마(라이트 럭스 / 다크 엘레강스) ---------- */
+const THEME_KEY = "dash_theme_v1";
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem(THEME_KEY, t); } catch (e) {}
+  document.querySelectorAll("#theme-toggle button").forEach((b) =>
+    b.classList.toggle("active", b.dataset.themeVal === t));
+}
+function bindThemeToggle() {
+  let saved = "light";
+  try { saved = localStorage.getItem(THEME_KEY) || "light"; } catch (e) {}
+  applyTheme(saved);
+  document.querySelectorAll("#theme-toggle button").forEach((b) => {
+    b.onclick = () => { applyTheme(b.dataset.themeVal); if (DATA) renderCharts(); };
+  });
+}
+
+bindThemeToggle();
 bindEvents();
 bindPriceEvents();
 loadDashboard().catch((e) => {
